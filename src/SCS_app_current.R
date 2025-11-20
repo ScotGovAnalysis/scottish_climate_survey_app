@@ -152,6 +152,12 @@ ui <- fluidPage(
                  
                  tags$hr(),
                  
+                 
+                 h5("Weighting Variable"),
+                 uiOutput("wgt_select_ui"),
+                 tags$hr(),
+                 
+                 
                  # 7) Compute button
                  actionButton("compute_stats", "Compute Statistics", class = "btn-primary"),
                  
@@ -977,15 +983,22 @@ server <- function(input, output, session) {
         )
       
       # Render pairwise results table
+      
       output$pairwise_table <- DT::renderDT({
         DT::datatable(
           res_df %>%
             dplyr::select(Comparison, Outcome, Diff_pct, SE_pct, Raw_p, Bonferroni_p, Significant_05),
-          options = list(scrollX = TRUE, dom = "tip"),
+          options = list(
+            scrollX = TRUE,
+            dom = "tip",
+            paging = FALSE,           # disable pagination
+            pageLength = nrow(res_df) # show all rows
+          ),
           rownames = FALSE
         ) %>%
           DT::formatRound(columns = c("Raw_p", "Bonferroni_p"), digits = 4)
       })
+      
       
       # Update chisq_output to indicate pairwise tests were computed
       output$chisq_output <- renderText({
