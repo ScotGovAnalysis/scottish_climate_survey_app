@@ -904,99 +904,109 @@ server <- function(input, output, session) {
     })
     
     
-    # Only run pairwise if overall is significant at alpha = 0.05
+    
+    # If overall test is significant, compute pairwise Wald tests for each outcome level
     alpha <- 0.05
     if (!is.na(p_val) && p_val < alpha) {
       
-      # current levels after collapsing / dropping
+      # Current levels after collapsing
       grp_lvls <- levels(droplevels(dsgn$variables$.group))
       q_lvls   <- levels(droplevels(dsgn$variables$.question))
       
-      # need at least two group levels and at least one outcome level
-      if (length(grp_lvls) >= 2 && length(q_lvls) >= 1) {
+      # All pairwise combinations of grouping levels
+      pairs <- utils::combn(grp_lvls, 2, simplify = FALSE)
+      
+      res_list <- list()
+      
+      for (pair in pairs) {
+        g1 <- pair[1]; g2 <- pair[2]
         
-        # choose reference outcome level automatically (first level of .question)
-        ref_level <- q_lvls[1]
+        # Subset design to these two groups
+        sub_dsgn <- subset(dsgn, .group %in% c(g1, g2))
         
-        # all pairwise combinations of group levels
-        pairs <- utils::combn(grp_lvls, 2, simplify = FALSE)
-        
-        # run comparisons
-        cmp_list <- lapply(pairs, function(pr) {
-          pairwise_comparison(
-            design         = dsgn,
-            var1           = ".group",
-            var2           = ".question",
-            var1_level1    = pr[1],
-            var1_level2    = pr[2],
-            var2_ref_level = ref_level
+        # For each outcome level, compute Wald test for difference in proportions
+        for (y in q_lvls) {
+          # Create indicator variable inside design for outcome == y
+          sub_dsgn$variables$outcome_ind <- as.numeric(sub_dsgn$variables$.question == y)
+          
+          # svyby estimates weighted mean of outcome_ind by group
+          # Formula uses grouping variable dynamically
+          by_formula <- as.formula("~.group")
+          by_fit <- svyby(~outcome_ind, by_formula, svymean, design = sub_dsgn)
+          
+          # Ensure both groups are present
+          if (!all(c(g1, g2) %in% by_fit$.group)) next
+          
+          # Extract coefficients (proportions) and variance-covariance matrix
+          co <- coef(by_fit)[c(g1, g2)]  # estimated proportions for g1 and g2
+          V  <- vcov(by_fit)[c(g1, g2), c(g1, g2)]  # variance-covariance matrix
+          
+          # --- Wald Test Explanation ---
+          # We test H0: p_g1 - p_g2 = 0 using a linear contrast
+          # Contrast vector d = (1, -1)
+          # Estimated difference: diff_est = sum(d * co)
+          # Variance of difference: Var(diff) = d' V d
+          # SE = sqrt(Var(diff))
+          # Wald z-statistic: z = diff_est / SE
+          # p-value: two-sided normal approximation
+          
+          dvec <- c(1, -1)
+          diff_est <- sum(dvec * co)
+          diff_se  <- sqrt(drop(dvec %*% V %*% dvec))
+          z <- diff_est / diff_se
+          p <- 2 * (1 - pnorm(abs(z)))  # two-sided p-value
+          
+          res_list[[length(res_list) + 1]] <- data.frame(
+            Comparison = paste(g1, "vs", g2),
+            Outcome    = y,
+            Diff       = diff_est,   # difference in proportions
+            SE         = diff_se,
+            Raw_p      = p
           )
-        })
-        
-        # extract p-values and ref-level differences
-        raw_p     <- vapply(cmp_list, function(x) x$test$p.value, numeric(1))
-        prop_diff <- vapply(cmp_list, function(x) x$ref_level_diff, numeric(1))
-        
-        # Bonferroni adjustment
-        adj_p <- p.adjust(raw_p, method = "bonferroni")
-        
-        # assemble readable comparison names "A vs B"
-        cmp_names <- vapply(pairs, function(pr) paste0(pr[1], " vs ", pr[2]), character(1))
-        
-        results_df <- data.frame(
-          Comparison   = cmp_names,
-          Raw_p        = signif(raw_p, 4),
-          Bonferroni_p = signif(adj_p, 4),
-          Significant_05 = ifelse(adj_p < alpha, "Yes", "No"),
-          Ref_Outcome_Level = ref_level,
-          Ref_Level_Prop_Diff = round(prop_diff, 4),  # level1 - level2
-          stringsAsFactors = FALSE
-        )
-        
-        # render pairwise results table
-        output$pairwise_table <- DT::renderDT({
-          DT::datatable(
-            results_df,
-            options = list(scrollX = TRUE, dom = "tip"),
-            rownames = FALSE
-          )
-        })
-        
-        # optional: note for the user
-        output$chisq_output <- renderText({
-          paste0("Overall Chi-Square test (Rao–Scott)\n",
-                 "p-value: ", signif(p_val, 3), "\n",
-                 "Significant difference at alpha = 0.05\n",
-                 "Pairwise comparisons shown below (Bonferroni corrected).")
-        })
-        
-      } else {
-        # not enough levels for pairwise
-        output$pairwise_table <- DT::renderDT({
-          DT::datatable(
-            data.frame(Message = "Pairwise comparisons not computed: insufficient levels."),
-            options = list(dom = "t"), rownames = FALSE
-          )
-        })
+        }
       }
       
+      # Combine results and apply Bonferroni correction across ALL tests
+      res_df <- dplyr::bind_rows(res_list)
+      res_df <- res_df %>%
+        dplyr::mutate(
+          Bonferroni_p = p.adjust(Raw_p, method = "bonferroni"),
+          Significant_05 = ifelse(Bonferroni_p < alpha, "Yes", "No"),
+          Diff_pct = round(100 * Diff, 1),
+          SE_pct   = round(100 * SE, 1)
+        )
+      
+      # Render pairwise results table
+      output$pairwise_table <- DT::renderDT({
+        DT::datatable(
+          res_df %>%
+            dplyr::select(Comparison, Outcome, Diff_pct, SE_pct, Raw_p, Bonferroni_p, Significant_05),
+          options = list(scrollX = TRUE, dom = "tip"),
+          rownames = FALSE
+        ) %>%
+          DT::formatRound(columns = c("Raw_p", "Bonferroni_p"), digits = 4)
+      })
+      
+      # Update chisq_output to indicate pairwise tests were computed
+      output$chisq_output <- renderText({
+        paste0("Overall Chi-Square test (Rao–Scott)\n",
+               "p-value: ", signif(p_val, 3), "\n",
+               "Significant difference at alpha = 0.05\n",
+               "Pairwise Wald tests shown below (Bonferroni corrected).")
+      })
+      
     } else {
-      # overall not significant: clear/annotate pairwise panel
+      # If overall test not significant, clear pairwise table
       output$pairwise_table <- DT::renderDT({
         DT::datatable(
           data.frame(Message = "Overall test not significant at alpha = 0.05; pairwise comparisons not computed."),
           options = list(dom = "t"), rownames = FALSE
         )
       })
+      
     }
-    
+  
   })
-  
-  
-  
-  
-  
-  
 }
 
 shinyApp(ui, server)
