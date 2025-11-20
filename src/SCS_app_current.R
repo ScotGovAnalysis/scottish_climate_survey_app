@@ -25,89 +25,86 @@ options(shiny.maxRequestSize = 100 * 1024^2)   # Allow uploads up to 100 MB
 
 ui <- fluidPage(
   titlePanel("Scottish Climate Survey – Weighted proportions by group"),
-  sidebarLayout(
-    sidebarPanel(
-      fileInput(
-        "file", "Upload data workbook (.xlsx)",
-        accept = ".xlsx", buttonLabel = "Browse...",
-        placeholder = "Choose Scottish Climate Survey - 2024 data + labels.xlsx"
-      ),
-      helpText("Max file size: 10 MB. Expects sheets: Data, Variable Labels, Value Labels."),
-      checkboxInput("debug", "Show debug panel", FALSE),
-      tags$hr(),
-      uiOutput("var_select_ui"),
-      uiOutput("grp1_select_ui"),
-      uiOutput("grp2_select_ui"),
-      uiOutput("wgt_select_ui"),
-      tags$hr(),
-      checkboxInput("show_counts", "Show unweighted Ns in header", TRUE),
-      checkboxInput("drop_empty_groups", "Drop groups with all-missing responses", TRUE),
-      
-      # --- Exclude specific response levels (applies to outcome AND groups) ---
-      tags$hr(),
-      h5("Exclude response levels"),
-      checkboxGroupInput(
-        "exclude_levels",
-        NULL,
-        choices  = c("Don't know", "Prefer not to say", "Not stated"),
-        selected = character(0),
-        inline   = FALSE
-      ),
-      
-      # --- Likert colour controls -------------------------------------------
-      selectInput(
-        "palette",
-        label   = "Likert colour palette",
-        choices = c(
-          "Red–Yellow–Green (RdYlGn)" = "RdYlGn",
-          "Red–Blue (RdBu)"           = "RdBu",
-          "Purple–Orange (PuOr)"      = "PuOr",
-          "Brown–Blue-Green (BrBG)"   = "BrBG",
-          "Blue–Red (BuRd, reverse RdBu)" = "BuRd" # convenience alias
-        ),
-        selected = "RdYlGn",
-        width    = "100%"
-      ),
-      checkboxInput(
-        "palette_reverse",
-        label = "Reverse colours (flip ends)",
-        value = FALSE
-      ),
-      width = 4
+  
+  # Top panel for file upload (always visible)
+  fluidRow(
+    column(6,
+           fileInput("file", "Upload data workbook (.xlsx)",
+                     accept = ".xlsx", buttonLabel = "Browse...",
+                     placeholder = "Choose Scottish Climate Survey - 2024 data + labels.xlsx"
+           ),
+           helpText("Max file size: 10 MB. Expects sheets: Data, Variable Labels, Value Labels.")
+    ),
+    column(6,
+           checkboxInput("debug", "Show debug panel", FALSE)
+    )
+  ),
+  tags$hr(),
+  
+  # Tabs for Plots and Statistics
+  tabsetPanel(
+    tabPanel("Plots",
+             sidebarLayout(
+               sidebarPanel(
+                 uiOutput("var_select_ui"),
+                 uiOutput("grp1_select_ui"),
+                 uiOutput("grp2_select_ui"),
+                 uiOutput("wgt_select_ui"),
+                 tags$hr(),
+                 checkboxInput("show_counts", "Show unweighted Ns in header", TRUE),
+                 checkboxInput("drop_empty_groups", "Drop groups with all-missing responses", TRUE),
+                 tags$hr(),
+                 h5("Exclude response levels"),
+                 checkboxGroupInput("exclude_levels", NULL,
+                                    choices = c("Don't know", "Prefer not to say", "Not stated"),
+                                    selected = character(0)
+                 ),
+                 tags$hr(),
+                 selectInput("palette", "Likert colour palette",
+                             choices = c(
+                               "Red–Yellow–Green (RdYlGn)" = "RdYlGn",
+                               "Red–Blue (RdBu)" = "RdBu",
+                               "Purple–Orange (PuOr)" = "PuOr",
+                               "Brown–Blue-Green (BrBG)" = "BrBG",
+                               "Blue–Red (BuRd, reverse RdBu)" = "BuRd"
+                             ),
+                             selected = "RdYlGn"
+                 ),
+                 checkboxInput("palette_reverse", "Reverse colours (flip ends)", FALSE),
+                 width = 4
+               ),
+               mainPanel(
+                 uiOutput("question_header"),
+                 fluidRow(
+                   column(8, plotOutput("prop_plot", height = "600px")),
+                   column(4,
+                          h5("Downloads"),
+                          downloadButton("dl_plot_jpg", "Download plot (JPG)", class = "btn-primary"),
+                          tags$br(), tags$br(),
+                          downloadButton("dl_table_csv", "Download table (CSV)")
+                   )
+                 ),
+                 tags$hr(),
+                 conditionalPanel(
+                   condition = "input.debug == true",
+                   h4("Debug panel"),
+                   verbatimTextOutput("debug_text"),
+                   DTOutput("debug_varlab"),
+                   DTOutput("debug_vallab"),
+                   DTOutput("debug_data_head"),
+                   tags$hr(),
+                   h5("Plot diagnostics"),
+                   verbatimTextOutput("plot_diag"),
+                   DTOutput("plot_preview")
+                 ),
+                 DTOutput("prop_table"),
+                 width = 8
+               )
+             )
     ),
     
-    mainPanel(
-      uiOutput("question_header"),
-      
-      # Plot + download
-      fluidRow(
-        column(8, plotOutput("prop_plot", height = "600px")),
-        column(4,
-               h5("Downloads"),
-               downloadButton("dl_plot_jpg", "Download plot (JPG)", class = "btn-primary"),
-               tags$br(), tags$br(),
-               downloadButton("dl_table_csv", "Download table (CSV)")
-        )
-      ),
-      tags$hr(),
-      
-      # Debug panel (optional)
-      conditionalPanel(
-        condition = "input.debug == true",
-        h4("Debug panel"),
-        verbatimTextOutput("debug_text", placeholder = TRUE),
-        DTOutput("debug_varlab"),
-        DTOutput("debug_vallab"),
-        DTOutput("debug_data_head"),
-        tags$hr(),
-        h5("Plot diagnostics"),
-        verbatimTextOutput("plot_diag", placeholder = TRUE),
-        DTOutput("plot_preview", width = "100%")
-      ),
-      
-      # Proportion table (all rows)
-      DTOutput("prop_table"),
-      width = 8
+    tabPanel("Statistics",
+             h4("Chi-squared tests will be implemented here.")
     )
   )
 )
