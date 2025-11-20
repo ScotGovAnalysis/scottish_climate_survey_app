@@ -103,10 +103,11 @@ ui <- fluidPage(
              )
     ),
     
+    
     tabPanel("Statistics",
              sidebarLayout(
                sidebarPanel(
-                 # 1) Exclude response levels
+                 # Exclude response levels
                  h5("Exclude response levels"),
                  checkboxGroupInput("exclude_levels_stats", NULL,
                                     choices = c("Don't know", "Prefer not to say", "Not stated"),
@@ -114,56 +115,49 @@ ui <- fluidPage(
                  ),
                  tags$hr(),
                  
-                 # 2) Drop groups with all-missing responses
+                 # Drop groups with all-missing responses
                  checkboxInput("drop_empty_groups_stats", "Drop groups with all-missing responses", TRUE),
                  tags$hr(),
                  
-                 # 3) Variable of interest selection (questions starting with q or @q)
+                 # Variable of Interest (unique ID for Statistics tab)
                  h5("Variable of Interest (Question)"),
-                 uiOutput("var_select_ui"),  # dynamic dropdown showing question text
-                 
+                 uiOutput("var_select_stats_ui"),  # NEW ID
                  tags$hr(),
-                 h5("Group levels for Variable of Interest"),
                  
-                 # 4) Five text fields + dropdowns for new level names and original levels
+                 # Group levels for Variable of Interest
+                 h5("Group levels for Variable of Interest"),
                  lapply(1:5, function(i) {
                    tagList(
                      textInput(paste0("var_group_name_", i), paste("New level", i, "name:"), ""),
-                     uiOutput(paste0("var_group_levels_ui_", i))  # dynamic dropdown for levels
+                     uiOutput(paste0("var_group_levels_ui_", i))
                    )
                  }),
-                 
                  tags$hr(),
                  
-                 # 5) Primary grouping variable selection
+                 # Primary Grouping Variable (unique ID for Statistics tab)
                  h5("Primary Grouping Variable"),
-                 uiOutput("grp1_select_ui"),  # dynamic dropdown for grouping variable
-                 
+                 uiOutput("grp1_select_stats_ui"),  # NEW ID
                  tags$hr(),
-                 h5("Group levels for Primary Grouping Variable"),
                  
-                 # 6) Five text fields + dropdowns for grouping variable
+                 # Group levels for Primary Grouping Variable
+                 h5("Group levels for Primary Grouping Variable"),
                  lapply(1:5, function(i) {
                    tagList(
                      textInput(paste0("grp_group_name_", i), paste("New group", i, "name:"), ""),
-                     uiOutput(paste0("grp_group_levels_ui_", i))  # dynamic dropdown for levels
+                     uiOutput(paste0("grp_group_levels_ui_", i))
                    )
                  }),
-                 
                  tags$hr(),
                  
-                 
+                 # Weighting Variable (unique ID for Statistics tab)
                  h5("Weighting Variable"),
-                 uiOutput("wgt_select_ui"),
+                 uiOutput("wgt_select_stats_ui"),  # NEW ID
                  tags$hr(),
                  
-                 
-                 # 7) Compute button
+                 # Compute button
                  actionButton("compute_stats", "Compute Statistics", class = "btn-primary"),
-                 
                  width = 4
                ),
-               
                
                mainPanel(
                  h4("Chi-squared test results"),
@@ -173,9 +167,9 @@ ui <- fluidPage(
                  h4("Pairwise comparisons (Bonferroni)"),
                  DTOutput("pairwise_table")
                )
-               
              )
     )
+    
   )
 )
 
@@ -400,6 +394,43 @@ server <- function(input, output, session) {
                 choices  = c("Equal weights (1)" = "", setNames(wv$variable, wv$choice_lab)),
                 selected = "", width = "100%")
   })
+  
+  
+  # Statistics tab dropdowns (reuse logic from Plots tab)
+  output$var_select_stats_ui <- renderUI({
+    req(wb())
+    qv <- choices()$q
+    if (nrow(qv) == 0) {
+      return(tagList(h5("Variable of interest:"), div(class = "text-danger", "No @q* variables found.")))
+    }
+    selectInput("var_stats", "Variable of interest (question):",
+                choices = setNames(qv$variable, qv$choice_lab),
+                selected = qv$variable[1], width = "100%")
+  })
+  
+  output$grp1_select_stats_ui <- renderUI({
+    req(wb())
+    gv <- choices()$g
+    if (nrow(gv) == 0) {
+      return(tagList(h5("Primary grouping variable:"), div(class = "text-danger", "No grouping variables found.")))
+    }
+    selectInput("grp1_stats", "Primary grouping variable:",
+                choices = setNames(gv$variable, gv$choice_lab),
+                selected = gv$variable[1], width = "100%")
+  })
+  
+  output$wgt_select_stats_ui <- renderUI({
+    req(wb())
+    wv <- choices()$w
+    if (nrow(wv) == 0) {
+      return(selectInput("wgt_stats", "Weighting variable:",
+                         choices = c("Equal weights (1)" = ""), selected = "", width = "100%"))
+    }
+    selectInput("wgt_stats", "Weighting variable:",
+                choices = c("Equal weights (1)" = "", setNames(wv$variable, wv$choice_lab)),
+                selected = "", width = "100%")
+  })
+  
   
   # ---------- Value label helper ----------
   make_factor <- function(x, varname, vallab) {
