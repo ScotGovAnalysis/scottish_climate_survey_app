@@ -104,7 +104,66 @@ ui <- fluidPage(
     ),
     
     tabPanel("Statistics",
-             h4("Chi-squared tests will be implemented here.")
+             sidebarLayout(
+               sidebarPanel(
+                 # 1) Exclude response levels
+                 h5("Exclude response levels"),
+                 checkboxGroupInput("exclude_levels_stats", NULL,
+                                    choices = c("Don't know", "Prefer not to say", "Not stated"),
+                                    selected = character(0)
+                 ),
+                 tags$hr(),
+                 
+                 # 2) Drop groups with all-missing responses
+                 checkboxInput("drop_empty_groups_stats", "Drop groups with all-missing responses", TRUE),
+                 tags$hr(),
+                 
+                 # 3) Variable of interest selection (questions starting with q or @q)
+                 h5("Variable of Interest (Question)"),
+                 uiOutput("var_select_ui"),  # dynamic dropdown showing question text
+                 
+                 tags$hr(),
+                 h5("Group levels for Variable of Interest"),
+                 
+                 # 4) Five text fields + dropdowns for new level names and original levels
+                 lapply(1:5, function(i) {
+                   tagList(
+                     textInput(paste0("var_group_name_", i), paste("New level", i, "name:"), ""),
+                     uiOutput(paste0("var_group_levels_ui_", i))  # dynamic dropdown for levels
+                   )
+                 }),
+                 
+                 tags$hr(),
+                 
+                 # 5) Primary grouping variable selection
+                 h5("Primary Grouping Variable"),
+                 uiOutput("grp1_select_ui"),  # dynamic dropdown for grouping variable
+                 
+                 tags$hr(),
+                 h5("Group levels for Primary Grouping Variable"),
+                 
+                 # 6) Five text fields + dropdowns for grouping variable
+                 lapply(1:5, function(i) {
+                   tagList(
+                     textInput(paste0("grp_group_name_", i), paste("New group", i, "name:"), ""),
+                     uiOutput(paste0("grp_group_levels_ui_", i))  # dynamic dropdown for levels
+                   )
+                 }),
+                 
+                 tags$hr(),
+                 
+                 # 7) Compute button
+                 actionButton("compute_stats", "Compute Statistics", class = "btn-primary"),
+                 
+                 width = 4
+               ),
+               
+               mainPanel(
+                 h4("Chi-squared test results will appear here."),
+                 verbatimTextOutput("chisq_output"),
+                 DTOutput("chisq_table")
+               )
+             )
     )
   )
 )
@@ -143,6 +202,21 @@ server <- function(input, output, session) {
     }
     if (isTRUE(reverse)) rev(cols) else cols
   }
+  
+  
+  # ---------- Helper: safe collapse + drop unassigned levels ----------
+  collapse_with_drop <- function(fct, mapping_list) {
+    # If no new level names provided, return original factor
+    if (length(mapping_list) == 0) return(forcats::fct_drop(fct))
+    # All levels the user chose to keep
+    keep_levels <- unique(unlist(mapping_list, use.names = FALSE))
+    # Mark all other levels as "_DROP_" so we can remove those rows
+    f_other <- forcats::fct_other(fct, keep = keep_levels, other_level = "_DROP_")
+    # Collapse kept levels into user-specified names
+    f_collapsed <- suppressWarnings(forcats::fct_collapse(f_other, !!!mapping_list))
+    forcats::fct_drop(f_collapsed)
+  }
+  
   
   # ---------- Read workbook with validations ----------
   wb <- reactive({
@@ -615,6 +689,175 @@ server <- function(input, output, session) {
       if (length(input$exclude_levels) == 0) "None" else paste(input$exclude_levels, collapse = ", ")
     )
   })
+  
+ ##### Statistics tab logic ###### 
+  # --- Reactive: levels for selected Variable of Interest ---
+  var_levels <- reactive({
+    req(input$var)  # from var_select_ui
+    vallab <- wb()$vallab
+    lvls <- vallab %>% filter(variable == input$var) %>% pull(label)
+    if (length(lvls) == 0) lvls <- unique(as.character(wb()$data[[input$var]]))
+    lvls
+  })
+  
+  # --- Reactive: levels for selected Primary Grouping Variable ---
+  grp_levels <- reactive({
+    req(input$grp1)  # from grp1_select_ui
+    vallab <- wb()$vallab
+    lvls <- vallab %>% filter(variable == input$grp1) %>% pull(label)
+    if (length(lvls) == 0) lvls <- unique(as.character(wb()$data[[input$grp1]]))
+    lvls
+  })
+  
+  # --- Render dropdowns for Variable of Interest grouping ---
+  for (i in 1:5) {
+    local({
+      idx <- i
+      output[[paste0("var_group_levels_ui_", idx)]] <- renderUI({
+        req(var_levels())
+        selectInput(
+          paste0("var_group_levels_", idx),
+          paste("Select levels for new group", idx),
+          choices = var_levels(),
+          selected = NULL,
+          multiple = TRUE,
+          width = "100%"
+        )
+      })
+    })
+  }
+  
+  # --- Render dropdowns for Primary Grouping Variable grouping ---
+  for (i in 1:5) {
+    local({
+      idx <- i
+      output[[paste0("grp_group_levels_ui_", idx)]] <- renderUI({
+        req(grp_levels())
+        selectInput(
+          paste0("grp_group_levels_", idx),
+          paste("Select levels for new group", idx),
+          choices = grp_levels(),
+          selected = NULL,
+          multiple = TRUE,
+          width = "100%"
+        )
+      })
+    })
+  }
+  
+  
+  # --- Compute statistics when button is clicked ---
+  
+  # ---------- Compute statistics when button is pressed ----------
+  observeEvent(input$compute_stats, {
+    req(wb(), input$var, input$grp1)
+    
+    df0 <- wb()$data
+    vallab <- wb()$vallab
+    
+    # Build labelled factors exactly like in your plotting pipeline
+    df <- df0 %>%
+      dplyr::mutate(
+        .question = make_factor(.data[[input$var]],  input$var,  vallab),
+        .group    = make_factor(.data[[input$grp1]], input$grp1, vallab)
+      )
+    
+    # Build mapping lists from UI (only slots with both name and selected levels)
+    var_map <- list()
+    for (i in 1:5) {
+      nm <- input[[paste0("var_group_name_", i)]]
+      lv <- input[[paste0("var_group_levels_", i)]]
+      if (is.character(nm) && nzchar(nm) && length(lv) > 0) var_map[[nm]] <- lv
+    }
+    grp_map <- list()
+    for (i in 1:5) {
+      nm <- input[[paste0("grp_group_name_", i)]]
+      lv <- input[[paste0("grp_group_levels_", i)]]
+      if (is.character(nm) && nzchar(nm) && length(lv) > 0) grp_map[[nm]] <- lv
+    }
+    
+    # Collapse according to mappings; mark unassigned as "_DROP_" then remove
+    df <- df %>%
+      dplyr::mutate(
+        .question = collapse_with_drop(.question, var_map),
+        .group    = collapse_with_drop(.group,    grp_map)
+      ) %>%
+      dplyr::filter(.question != "_DROP_", .group != "_DROP_")
+    
+    # Apply exclusions (as per Plots) if specified
+    if (length(input$exclude_levels_stats) > 0) {
+      df <- df %>%
+        dplyr::filter(!(.question %in% input$exclude_levels_stats),
+                      !(.group    %in% input$exclude_levels_stats))
+    }
+    
+    # Optional: drop groups with all-missing responses (as per Plots)
+    if (isTRUE(input$drop_empty_groups_stats)) {
+      df <- df %>% dplyr::group_by(.group) %>% dplyr::filter(any(!is.na(.question))) %>% dplyr::ungroup()
+    }
+    
+    # --- Weight selection: use input$wgt if available, else @weight0, else 1 ---
+    weight_col <- NULL
+    if (!is.null(input$wgt) && nzchar(input$wgt) && input$wgt %in% names(df0)) {
+      weight_col <- input$wgt
+    } else if ("@weight0" %in% names(df0)) {
+      weight_col <- "@weight0"
+    }
+    df <- df %>%
+      dplyr::mutate(
+        id = dplyr::row_number(),
+        .w = if (!is.null(weight_col)) suppressWarnings(as.numeric(.data[[weight_col]])) else 1
+      ) %>%
+      dplyr::mutate(.w = dplyr::if_else(is.na(.w) | .w < 0, 0, .w))
+    
+    # Validate there is data to analyse
+    validate(need(sum(df$.w) > 0 && nrow(df) > 0, "No data remaining after filters/grouping."))
+    
+    # Drop unused levels before design
+    df$.question <- droplevels(df$.question)
+    df$.group    <- droplevels(df$.group)
+    
+    # Survey design (avoid `.data` pronoun; use concrete columns)
+    dsgn <- survey::svydesign(ids = ~id, weights = ~.w, data = df)
+    
+    # Weighted table (rows: question, cols: group) and proportions by group (margin = 2)
+    wtab <- survey::svytable(~ .question + .group, dsgn)
+    validate(need(length(wtab) > 0, "No cells in contingency table."))
+    ptab <- prop.table(wtab, margin = 2)
+    
+    # Render proportion table (wide, %)
+    
+    props_df <- as.data.frame(ptab) %>%
+      tibble::as_tibble() %>%
+      dplyr::rename(response = `.question`, group = `.group`, prop = Freq)
+    
+    wide_props <- props_df %>%
+      dplyr::select(response, group, prop) %>%
+      tidyr::pivot_wider(names_from = group, values_from = prop, values_fill = 0) %>%
+      dplyr::arrange(response)
+    
+    output$chisq_table <- DT::renderDT({
+      DT::datatable(wide_props, options = list(scrollX = TRUE, dom = "tip"), rownames = FALSE) %>%
+        DT::formatPercentage(columns = setdiff(names(wide_props), "response"), digits = 1)
+    })
+    
+    
+    # Chi-square (Rao–Scott) test and interpretation
+    chisq_res <- survey::svychisq(~ .question + .group, design = dsgn, statistic = "F")
+    p_val <- tryCatch(chisq_res$p.value, error = function(e) NA_real_)
+    sig_text <- if (!is.na(p_val) && p_val < 0.05) "Significant difference at alpha = 0.05"
+    else "No significant difference at alpha = 0.05"
+    
+    output$chisq_output <- renderText({
+      paste0("Overall Chi-Square test (Rao–Scott)\n",
+             "p-value: ", if (!is.na(p_val)) signif(p_val, 3) else "NA", "\n",
+             sig_text)
+    })
+  })
+  
+  
+  
+  
 }
 
 shinyApp(ui, server)
