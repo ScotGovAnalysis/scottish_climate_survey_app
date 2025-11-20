@@ -158,11 +158,16 @@ ui <- fluidPage(
                  width = 4
                ),
                
+               
                mainPanel(
-                 h4("Chi-squared test results will appear here."),
+                 h4("Chi-squared test results"),
                  verbatimTextOutput("chisq_output"),
-                 DTOutput("chisq_table")
+                 DTOutput("chisq_table"),
+                 tags$hr(),
+                 h4("Pairwise comparisons (Bonferroni)"),
+                 DTOutput("pairwise_table")
                )
+               
              )
     )
   )
@@ -215,6 +220,50 @@ server <- function(input, output, session) {
     # Collapse kept levels into user-specified names
     f_collapsed <- suppressWarnings(forcats::fct_collapse(f_other, !!!mapping_list))
     forcats::fct_drop(f_collapsed)
+  }
+  
+  
+  #-----------
+  #
+  # === Helper: pairwise comparison for two group levels on a chosen outcome reference level ===
+  pairwise_comparison <- function(design, var1, var2,
+                                  var1_level1, var1_level2,
+                                  var2_ref_level) {
+    
+    # subset to the two comparison levels of var1
+    keep_rows <- design$variables[[var1]] %in% c(var1_level1, var1_level2)
+    sub_dsgn  <- subset(design, keep_rows)
+    
+    # drop unused levels on both variables
+    sub_dsgn$variables[[var1]] <- droplevels(sub_dsgn$variables[[var1]])
+    sub_dsgn$variables[[var2]] <- droplevels(sub_dsgn$variables[[var2]])
+    
+    # safe formula with backticks (handles names like ".group", "@qa4_1")
+    var1_safe   <- paste0("`", var1, "`")
+    var2_safe   <- paste0("`", var2, "`")
+    test_formula <- as.formula(paste0("~", var1_safe, " + ", var2_safe))
+    
+    # design-based chi-square for two-level comparison
+    test_res <- survey::svychisq(test_formula, sub_dsgn, statistic = "Chisq")
+    
+    # proportions by row (within each level of var1)
+    props <- prop.table(survey::svytable(test_formula, sub_dsgn), margin = 1)
+    
+    # guard: ref level must exist; if not, choose the first available level
+    cols <- colnames(props)
+    if (!(var2_ref_level %in% cols)) {
+      var2_ref_level <- cols[1]
+    }
+    
+    # difference in the reference outcome level proportion: level1 - level2
+    ref_diff <- as.numeric(props[var1_level1, var2_ref_level]) -
+      as.numeric(props[var1_level2, var2_ref_level])
+    
+    list(
+      test           = test_res,
+      props          = props,
+      ref_level_diff = ref_diff
+    )
   }
   
   
@@ -853,7 +902,97 @@ server <- function(input, output, session) {
              "p-value: ", if (!is.na(p_val)) signif(p_val, 3) else "NA", "\n",
              sig_text)
     })
+    
+    
+    # Only run pairwise if overall is significant at alpha = 0.05
+    alpha <- 0.05
+    if (!is.na(p_val) && p_val < alpha) {
+      
+      # current levels after collapsing / dropping
+      grp_lvls <- levels(droplevels(dsgn$variables$.group))
+      q_lvls   <- levels(droplevels(dsgn$variables$.question))
+      
+      # need at least two group levels and at least one outcome level
+      if (length(grp_lvls) >= 2 && length(q_lvls) >= 1) {
+        
+        # choose reference outcome level automatically (first level of .question)
+        ref_level <- q_lvls[1]
+        
+        # all pairwise combinations of group levels
+        pairs <- utils::combn(grp_lvls, 2, simplify = FALSE)
+        
+        # run comparisons
+        cmp_list <- lapply(pairs, function(pr) {
+          pairwise_comparison(
+            design         = dsgn,
+            var1           = ".group",
+            var2           = ".question",
+            var1_level1    = pr[1],
+            var1_level2    = pr[2],
+            var2_ref_level = ref_level
+          )
+        })
+        
+        # extract p-values and ref-level differences
+        raw_p     <- vapply(cmp_list, function(x) x$test$p.value, numeric(1))
+        prop_diff <- vapply(cmp_list, function(x) x$ref_level_diff, numeric(1))
+        
+        # Bonferroni adjustment
+        adj_p <- p.adjust(raw_p, method = "bonferroni")
+        
+        # assemble readable comparison names "A vs B"
+        cmp_names <- vapply(pairs, function(pr) paste0(pr[1], " vs ", pr[2]), character(1))
+        
+        results_df <- data.frame(
+          Comparison   = cmp_names,
+          Raw_p        = signif(raw_p, 4),
+          Bonferroni_p = signif(adj_p, 4),
+          Significant_05 = ifelse(adj_p < alpha, "Yes", "No"),
+          Ref_Outcome_Level = ref_level,
+          Ref_Level_Prop_Diff = round(prop_diff, 4),  # level1 - level2
+          stringsAsFactors = FALSE
+        )
+        
+        # render pairwise results table
+        output$pairwise_table <- DT::renderDT({
+          DT::datatable(
+            results_df,
+            options = list(scrollX = TRUE, dom = "tip"),
+            rownames = FALSE
+          )
+        })
+        
+        # optional: note for the user
+        output$chisq_output <- renderText({
+          paste0("Overall Chi-Square test (Rao–Scott)\n",
+                 "p-value: ", signif(p_val, 3), "\n",
+                 "Significant difference at alpha = 0.05\n",
+                 "Pairwise comparisons shown below (Bonferroni corrected).")
+        })
+        
+      } else {
+        # not enough levels for pairwise
+        output$pairwise_table <- DT::renderDT({
+          DT::datatable(
+            data.frame(Message = "Pairwise comparisons not computed: insufficient levels."),
+            options = list(dom = "t"), rownames = FALSE
+          )
+        })
+      }
+      
+    } else {
+      # overall not significant: clear/annotate pairwise panel
+      output$pairwise_table <- DT::renderDT({
+        DT::datatable(
+          data.frame(Message = "Overall test not significant at alpha = 0.05; pairwise comparisons not computed."),
+          options = list(dom = "t"), rownames = FALSE
+        )
+      })
+    }
+    
   })
+  
+  
   
   
   
