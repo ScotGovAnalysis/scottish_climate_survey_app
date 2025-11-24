@@ -1,4 +1,4 @@
-#Scottish Climate Survey App
+# Scottish Climate Survey App
 
 This app is designed to visualise and analyse the Scottish Climate Survey 2025 data
 
