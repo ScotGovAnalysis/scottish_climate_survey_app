@@ -43,7 +43,9 @@ ui <- fluidPage(
   
   # Tabs for Plots and Statistics
   tabsetPanel(
-    tabPanel("Plots",
+    
+    # Existing tab renamed
+    tabPanel("Plots - raw",
              sidebarLayout(
                sidebarPanel(
                  uiOutput("var_select_ui"),
@@ -85,23 +87,45 @@ ui <- fluidPage(
                    )
                  ),
                  tags$hr(),
-                 conditionalPanel(
-                   condition = "input.debug == true",
-                   h4("Debug panel"),
-                   verbatimTextOutput("debug_text"),
-                   DTOutput("debug_varlab"),
-                   DTOutput("debug_vallab"),
-                   DTOutput("debug_data_head"),
-                   tags$hr(),
-                   h5("Plot diagnostics"),
-                   verbatimTextOutput("plot_diag"),
-                   DTOutput("plot_preview")
-                 ),
                  DTOutput("prop_table"),
                  width = 8
                )
              )
     ),
+    
+    # ✅ New tab for grouped plots
+    tabPanel("Plots - grouped",
+             sidebarLayout(
+               sidebarPanel(
+                 h5("Variable of Interest (multi-select question)"),
+                 uiOutput("var_select_grouped_ui"),  # NEW ID
+                 tags$hr(),
+                 h5("Primary Grouping Variable"),
+                 uiOutput("grp1_select_grouped_ui"), # NEW ID
+                 tags$hr(),
+                 h5("Weighting Variable"),
+                 uiOutput("wgt_select_grouped_ui"),  # NEW ID
+                 tags$hr(),
+                 h5("Exclude response levels"),
+                 checkboxGroupInput("exclude_levels_grouped", NULL,
+                                    choices = c("Don't know", "Prefer not to say", "Not stated"),
+                                    selected = character(0)
+                 ),
+                 checkboxInput("drop_empty_groups_grouped", "Drop groups with all-missing responses", TRUE),
+                 tags$hr(),
+                 actionButton("compute_grouped", "Compute Grouped Plot", class = "btn-primary"),
+                 width = 4
+               ),
+               mainPanel(
+                 h4("Grouped Options Table"),
+                 DTOutput("grouped_table"),
+                 tags$hr(),
+                 h4("Grouped Plot (coming soon)"),
+                 plotOutput("grouped_plot", height = "600px")
+               )
+             )
+    ),
+    
     
     
     tabPanel("Statistics",
@@ -1051,6 +1075,279 @@ server <- function(input, output, session) {
     }
   
   })
+  
+  # ========== GROUPED TAB: helpers to discover @-prefix questions & labels ==========
+  
+  # Find unique '@' roots (e.g., '@qa3') from data column names, and attach question text
+  grouped_prefixes <- reactive({
+    req(wb())
+    df      <- wb()$data
+    varlab  <- wb()$varlab
+    
+    # Candidates: columns starting with '@' and containing an underscore (e.g., '@qa3_1')
+    at_vars <- names(df)[stringr::str_detect(names(df), "^@.+_")]
+    
+    if (length(at_vars) == 0) {
+      return(tibble::tibble(root = character(0), choice_lab = character(0)))
+    }
+    
+    # Root = part before underscore (e.g., '@qa3' from '@qa3_1')
+    roots <- unique(sub("^(.*?)(_.*)$", "\\1", at_vars))
+    
+    # Label for each root: prefer Variable Labels entry for the root;
+    # if not present, fall back to first available child’s variable label; else root code.
+    root_df <- lapply(roots, function(r) {
+      # Try exact match in Variable Labels
+      lab <- varlab %>% dplyr::filter(variable == r) %>% dplyr::pull(label)
+      if (length(lab) == 0 || is.na(lab[1]) || !nzchar(lab[1])) {
+        # Try any child label
+        lab <- varlab %>%
+          dplyr::filter(stringr::str_detect(variable, paste0("^", stringr::fixed(r), "_"))) %>%
+          dplyr::pull(label) %>% unique()
+      }
+      if (length(lab) == 0 || is.na(lab[1]) || !nzchar(lab[1])) lab <- r
+      tibble::tibble(root = r, choice_lab = lab[1])
+    }) %>% dplyr::bind_rows()
+    
+    root_df %>% dplyr::arrange(choice_lab)
+  })
+  
+  # For a selected root (e.g., '@qa3'), list its child variables e.g. '@qa3_1' ... '@qa3_k'
+  grouped_children <- function(root) {
+    req(wb(), root)
+    df <- wb()$data
+    vars <- names(df)[stringr::str_detect(names(df), paste0("^", stringr::fixed(root), "_"))]
+    # Stable order: numeric suffix if present, else lexical
+    # Extract trailing digits if present for ordering
+    ord <- suppressWarnings(as.integer(sub(".*_(\\d+)$", "\\1", vars)))
+    vars[order(ord, vars)]
+  }
+  
+  # Map each child variable to its "value==1" label from Value Labels; fallback to var name
+  child_one_labels <- function(children) {
+    req(wb())
+    vallab <- wb()$vallab
+    sapply(children, function(v) {
+      lab <- vallab %>% dplyr::filter(variable == v, value == "1") %>% dplyr::pull(label)
+      if (length(lab) == 0 || is.na(lab[1]) || !nzchar(lab[1])) v else lab[1]
+    }, USE.NAMES = TRUE)
+  }
+  
+  
+  # ========== GROUPED TAB: dropdowns (unique IDs; no conflict with raw tab) ==========
+  
+  output$var_select_grouped_ui <- renderUI({
+    pf <- grouped_prefixes()
+    if (nrow(pf) == 0) {
+      return(tagList(
+        h5("Variable of Interest (multi-select question)"),
+        div(class = "text-danger", "No '@' multi-select questions found.")
+      ))
+    }
+    selectInput(
+      "var_grouped_root", "Variable of Interest (multi-select question):",
+      choices = setNames(pf$root, pf$choice_lab),
+      selected = pf$root[1],
+      width = "100%"
+    )
+  })
+  
+  output$grp1_select_grouped_ui <- renderUI({
+    req(wb())
+    gv <- choices()$g
+    if (nrow(gv) == 0) {
+      return(tagList(
+        h5("Primary Grouping Variable"),
+        div(class = "text-danger", "No grouping variables found.")
+      ))
+    }
+    selectInput(
+      "grp1_grouped", "Primary Grouping Variable:",
+      choices = setNames(gv$variable, gv$choice_lab),
+      selected = gv$variable[1],
+      width = "100%"
+    )
+  })
+  
+  output$wgt_select_grouped_ui <- renderUI({
+    req(wb())
+    wv <- choices()$w
+    if (nrow(wv) == 0) {
+      return(selectInput("wgt_grouped", "Weighting variable:",
+                         choices = c("Equal weights (1)" = ""), selected = "", width = "100%"))
+    }
+    selectInput("wgt_grouped", "Weighting variable:",
+                choices = c("Equal weights (1)" = "", setNames(wv$variable, wv$choice_lab)),
+                selected = "",
+                width = "100%"
+    )
+  })
+  
+  # ========== GROUPED TAB: compute table when button is pressed ==========
+  
+  
+  observeEvent(input$compute_grouped, {
+    req(wb(), input$var_grouped_root, input$grp1_grouped)
+    
+    df0    <- wb()$data
+    varlab <- wb()$varlab
+    vallab <- wb()$vallab
+    
+    # --- DEBUG: show names in Data sheet
+    message("\n[DEBUG] Names(wb()$data):")
+    print(names(df0))
+    
+    # --- DEBUG: compute children with current helper and print them
+    children <- grouped_children(input$var_grouped_root)
+    message("[DEBUG] grouped_children(\"", input$var_grouped_root, "\") returned ", length(children), " names:")
+    print(children)
+    
+    overlap <- intersect(children, names(df0))
+    missing <- setdiff(children, names(df0))
+    message("[DEBUG] Overlap count: ", length(overlap))
+    if (length(missing) > 0) {
+      message("[DEBUG] Missing children not found in Data: ", paste(missing, collapse = ", "))
+    } else {
+      message("[DEBUG] No missing children; all returned names are present in Data.")
+    }
+    
+    validate(need(length(children) > 0,
+                  paste("No child variables found for", input$var_grouped_root)))
+    
+    # Build grouping factor
+    df <- df0 %>%
+      dplyr::mutate(.group = make_factor(.data[[input$grp1_grouped]], input$grp1_grouped, vallab))
+    
+    # Apply exclusions
+    if (length(input$exclude_levels_grouped) > 0) {
+      df <- df %>% dplyr::filter(!(.group %in% input$exclude_levels_grouped))
+    }
+    
+    # Create indicator columns
+    df <- df %>%
+      dplyr::mutate(
+        dplyr::across(dplyr::any_of(children),
+                      ~ ifelse(is.na(.), NA_real_, as.numeric(as.character(.) == "1")))
+      )
+    
+    # Drop empty groups if requested
+    if (isTRUE(input$drop_empty_groups_grouped)) {
+      df <- df %>%
+        dplyr::mutate(any_non_missing = rowSums(!is.na(dplyr::across(dplyr::any_of(children))), na.rm = TRUE)) %>%
+        dplyr::group_by(.group) %>%
+        dplyr::filter(any(any_non_missing > 0)) %>%
+        dplyr::ungroup() %>%
+        dplyr::select(-any_non_missing)
+    }
+    
+    # Weights
+    weight_col <- NULL
+    if (!is.null(input$wgt_grouped) && nzchar(input$wgt_grouped) && input$wgt_grouped %in% names(df0)) {
+      weight_col <- input$wgt_grouped
+    } else if ("@weight0" %in% names(df0)) {
+      weight_col <- "@weight0"
+    }
+    
+    df <- df %>%
+      dplyr::mutate(
+        id = dplyr::row_number(),
+        .w = if (!is.null(weight_col)) suppressWarnings(as.numeric(.data[[weight_col]])) else 1
+      ) %>%
+      dplyr::mutate(.w = dplyr::if_else(is.na(.w) | .w < 0, 0, .w))
+    
+    validate(need(sum(df$.w) > 0 && nrow(df) > 0, "No data remaining after filters/grouping."))
+    
+    df$.group <- droplevels(df$.group)
+    
+    # Survey design
+    dsg <- survey::svydesign(ids = ~id, weights = ~.w, data = df)
+    
+    # Formula for svyby
+    fml <- stats::as.formula(
+      paste("~", paste(sprintf("`%s`", children), collapse = " + "))
+    )
+    
+    by_grp <- survey::svyby(fml, ~ .group, survey::svymean, design = dsg, na.rm = TRUE)
+    
+    # --- Clean names (remove backticks)
+    names(by_grp) <- gsub("`", "", names(by_grp))
+    
+    # Debug prints
+    message("[DEBUG] Names(by_grp):")
+    print(names(by_grp))
+    
+    present_means <- intersect(children, names(by_grp))
+    message("[DEBUG] present_means:")
+    print(present_means)
+    
+    message("[DEBUG] nrow(df): ", nrow(df), ", sum weights: ", sum(df$.w))
+    
+    validate(need(length(present_means) > 0,
+                  "svyby returned no mean columns (all missing?). Try a different root or filters."))
+    
+    # Labels for present means
+    opt_labels <- child_one_labels(present_means)
+    
+    # Build wide table
+    wide_df <- by_grp %>%
+      tibble::as_tibble() %>%
+      dplyr::select(.group, dplyr::any_of(present_means)) %>%
+      { colnames(.) <- c(".group", unname(opt_labels)); . } %>%
+      #dplyr::mutate(dplyr::across(-.group, ~ 100 * .)) %>%
+      dplyr::arrange(.group)
+    
+    # Render table
+    output$grouped_table <- DT::renderDT({
+      pct_cols <- setdiff(names(wide_df), ".group")
+      DT::datatable(
+        wide_df,
+        options = list(scrollX = TRUE, dom = "t", paging = FALSE),
+        rownames = FALSE
+      ) %>%
+        DT::formatPercentage(columns = pct_cols, digits = 1) %>%
+        DT::formatStyle(".group", fontWeight = "bold")
+    })
+    
+    # Render plot
+    output$grouped_plot <- renderPlot({
+      validate(need(nrow(wide_df) > 0, "No data to plot."))
+      long_df <- wide_df %>%
+        tidyr::pivot_longer(cols = - .group, names_to = "option", values_to = "pct")
+      
+      ggplot2::ggplot(long_df, ggplot2::aes(x = option, y = .group, fill = pct)) +
+        ggplot2::geom_tile(color = "white") +
+        ggplot2::scale_fill_gradient(low = "#f7fbff", high = "#08306b", name = "% selected") +
+        ggplot2::labs(x = NULL, y = NULL) +
+        ggplot2::theme_minimal(base_size = 12) +
+        ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1),
+                       legend.position = "bottom")
+    })
+  })
+  
+  
+  
+  observeEvent(input$var_grouped_root, {
+    req(wb(), input$var_grouped_root)
+    message("\n[DEBUG] var_grouped_root changed to: ", input$var_grouped_root)
+    
+    df0 <- wb()$data
+    ch  <- grouped_children(input$var_grouped_root)
+    
+    message("[DEBUG] grouped_children returned ", length(ch), " names:")
+    print(ch)
+    
+    message("[DEBUG] Names(wb()$data):")
+    print(names(df0))
+    
+    missing <- setdiff(ch, names(df0))
+    if (length(missing) > 0) {
+      message("[DEBUG] Missing (not in data): ", paste(missing, collapse = ", "))
+    } else {
+      message("[DEBUG] All children exist in data.")
+    }
+  })
+  
+  
 }
 
 shinyApp(ui, server)
