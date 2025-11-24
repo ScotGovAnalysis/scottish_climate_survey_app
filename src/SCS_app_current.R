@@ -247,48 +247,7 @@ server <- function(input, output, session) {
   }
   
   
-  #-----------
-  #
-  # === Helper: pairwise comparison for two group levels on a chosen outcome reference level ===
-  pairwise_comparison <- function(design, var1, var2,
-                                  var1_level1, var1_level2,
-                                  var2_ref_level) {
-    
-    # subset to the two comparison levels of var1
-    keep_rows <- design$variables[[var1]] %in% c(var1_level1, var1_level2)
-    sub_dsgn  <- subset(design, keep_rows)
-    
-    # drop unused levels on both variables
-    sub_dsgn$variables[[var1]] <- droplevels(sub_dsgn$variables[[var1]])
-    sub_dsgn$variables[[var2]] <- droplevels(sub_dsgn$variables[[var2]])
-    
-    # safe formula with backticks (handles names like ".group", "@qa4_1")
-    var1_safe   <- paste0("`", var1, "`")
-    var2_safe   <- paste0("`", var2, "`")
-    test_formula <- as.formula(paste0("~", var1_safe, " + ", var2_safe))
-    
-    # design-based chi-square for two-level comparison
-    test_res <- survey::svychisq(test_formula, sub_dsgn, statistic = "Chisq")
-    
-    # proportions by row (within each level of var1)
-    props <- prop.table(survey::svytable(test_formula, sub_dsgn), margin = 1)
-    
-    # guard: ref level must exist; if not, choose the first available level
-    cols <- colnames(props)
-    if (!(var2_ref_level %in% cols)) {
-      var2_ref_level <- cols[1]
-    }
-    
-    # difference in the reference outcome level proportion: level1 - level2
-    ref_diff <- as.numeric(props[var1_level1, var2_ref_level]) -
-      as.numeric(props[var1_level2, var2_ref_level])
-    
-    list(
-      test           = test_res,
-      props          = props,
-      ref_level_diff = ref_diff
-    )
-  }
+  
   
   
   # ---------- Read workbook with validations ----------
@@ -673,18 +632,7 @@ server <- function(input, output, session) {
     out
   })
   output$prop_plot <- renderPlot({ prop_plot_obj() })
-  #
-  # output$prop_plot <- renderPlot({
-  #   res <- prop_plot_safe()
-  #   if (isTRUE(res$ok)) {
-  #     print(res$plot)
-  #   } else {
-  #     # Draw a simple placeholder so the panel isn’t blank
-  #     op <- par(no.readonly = TRUE); on.exit(par(op), add = TRUE)
-  #     plot.new(); title(main = "Plot error", col.main = "red3")
-  #     mtext(res$err, side = 3, line = -2, adj = 0, col = "red3", cex = 0.9)
-  #   }
-  # })
+
   
   
   # ---------- Wide table (only % columns + Total N) ----------
