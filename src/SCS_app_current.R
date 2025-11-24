@@ -1284,6 +1284,10 @@ server <- function(input, output, session) {
     
     by_grp <- survey::svyby(fml, ~ .group, survey::svymean, design = dsg, na.rm = TRUE)
     
+    
+   
+    
+    
     # --- Clean names (remove backticks)
     names(by_grp) <- gsub("`", "", names(by_grp))
     
@@ -1300,16 +1304,58 @@ server <- function(input, output, session) {
     validate(need(length(present_means) > 0,
                   "svyby returned no mean columns (all missing?). Try a different root or filters."))
     
-    # Labels for present means
-    opt_labels <- child_one_labels(present_means)
+    
+    # --- SIGNIFICANCE: Rao–Scott test per child indicator (global difference across .group)
+    # Ensure each child is a factor Yes/No for svychisq tables
+    df <- dsg$variables
+    make_yesno <- function(x) factor(ifelse(x == 1, "Yes",
+                                            ifelse(is.na(x), NA, "No")),
+                                     levels = c("No","Yes"))
+    for (v in children) {
+      df[[paste0(v, "_yesno")]] <- make_yesno(df[[v]])
+    }
+    dsg_sig <- survey::svydesign(ids = ~id, weights = ~.w, data = df)  # re-wrap with added columns
+    
+    pvals <- sapply(children, function(v) {
+      fml <- as.formula(paste0("~", paste0("`", v, "_yesno`"), " + .group"))
+      # Rao–Scott (F) is the default:
+      out <- survey::svychisq(fml, design = dsg_sig, na.rm = TRUE)
+      # Extract p-value robustly:
+      pv <- tryCatch(out$p.value, error = function(e) NA_real_)
+      pv
+    })
+    
+    # Multiple testing correction (Holm is conservative & simple; BH if you prefer FDR)
+    pvals_adj <- p.adjust(pvals, method = "holm")
+    
+    
+    # Clean names to match present_means
+    names(pvals_adj) <- sub("\\.X-squared$", "", names(pvals_adj))
+    
+    
+    # Attach markers to the option labels you already compute
+    opt_labels <- child_one_labels(present_means)   # you already build this
+    
+    sig_mark <- ifelse(is.na(pvals_adj[present_means]), "",
+                       ifelse(pvals_adj[present_means] < 0.05, "†", ""))
+    
+    opt_labels_marked <- paste0(unname(opt_labels), sig_mark)
+    
+    
+    message("[DEBUG] present_means: ", paste(present_means, collapse = ", "))
+    message("[DEBUG] pvals_adj names: ", paste(names(pvals_adj), collapse = ", "))
+    message("[DEBUG] sig_mark: ", paste(sig_mark, collapse = ", "))
+    
     
     # Build wide table
+    
     wide_df <- by_grp %>%
       tibble::as_tibble() %>%
       dplyr::select(.group, dplyr::any_of(present_means)) %>%
-      { colnames(.) <- c(".group", unname(opt_labels)); . } %>%
-      #dplyr::mutate(dplyr::across(-.group, ~ 100 * .)) %>%
+      { colnames(.) <- c(".group", opt_labels_marked); . } %>%
+      dplyr::mutate(dplyr::across(-.group, ~ round(100 * ., 1))) %>%
       dplyr::arrange(.group)
+                     
     
     # Render table
     output$grouped_table <- DT::renderDT({
@@ -1319,7 +1365,7 @@ server <- function(input, output, session) {
         options = list(scrollX = TRUE, dom = "t", paging = FALSE),
         rownames = FALSE
       ) %>%
-        DT::formatPercentage(columns = pct_cols, digits = 1) %>%
+ #       DT::formatPercentage(columns = pct_cols, digits = 1) %>%
         DT::formatStyle(".group", fontWeight = "bold")
     })
     
