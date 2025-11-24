@@ -802,22 +802,25 @@ server <- function(input, output, session) {
   
  ##### Statistics tab logic ###### 
   # --- Reactive: levels for selected Variable of Interest ---
+  
+  # Reactive: levels for selected Variable of Interest (Statistics tab)
   var_levels <- reactive({
-    req(input$var)  # from var_select_ui
+    req(input$var_stats)
     vallab <- wb()$vallab
-    lvls <- vallab %>% filter(variable == input$var) %>% pull(label)
-    if (length(lvls) == 0) lvls <- unique(as.character(wb()$data[[input$var]]))
+    lvls <- vallab %>% filter(variable == input$var_stats) %>% pull(label)
+    if (length(lvls) == 0) lvls <- unique(as.character(wb()$data[[input$var_stats]]))
     lvls
   })
   
-  # --- Reactive: levels for selected Primary Grouping Variable ---
+  # Reactive: levels for selected Primary Grouping Variable (Statistics tab)
   grp_levels <- reactive({
-    req(input$grp1)  # from grp1_select_ui
+    req(input$grp1_stats)
     vallab <- wb()$vallab
-    lvls <- vallab %>% filter(variable == input$grp1) %>% pull(label)
-    if (length(lvls) == 0) lvls <- unique(as.character(wb()$data[[input$grp1]]))
+    lvls <- vallab %>% filter(variable == input$grp1_stats) %>% pull(label)
+    if (length(lvls) == 0) lvls <- unique(as.character(wb()$data[[input$grp1_stats]]))
     lvls
   })
+  
   
   # --- Render dropdowns for Variable of Interest grouping ---
   for (i in 1:5) {
@@ -856,21 +859,32 @@ server <- function(input, output, session) {
   }
   
   
+  
+ 
+  
+  
+
+  
   # --- Compute statistics when button is clicked ---
   
   # ---------- Compute statistics when button is pressed ----------
   observeEvent(input$compute_stats, {
-    req(wb(), input$var, input$grp1)
+    req(wb(), input$var_stats, input$grp1_stats)
     
-    df0 <- wb()$data
+    
+    df0    <- wb()$data
     vallab <- wb()$vallab
     
-    # Build labelled factors exactly like in your plotting pipeline
+    message("[DEBUG] compute_stats triggered")
+    message("[DEBUG] var_stats: ", input$var_stats, " grp1_stats: ", input$grp1_stats)
+    
+    # Build labelled factors
     df <- df0 %>%
       dplyr::mutate(
-        .question = make_factor(.data[[input$var]],  input$var,  vallab),
-        .group    = make_factor(.data[[input$grp1]], input$grp1, vallab)
+        .question = make_factor(.data[[input$var_stats]], input$var_stats, vallab),
+        .group    = make_factor(.data[[input$grp1_stats]], input$grp1_stats, vallab)
       )
+    
     
     # Build mapping lists from UI (only slots with both name and selected levels)
     var_map <- list()
@@ -906,13 +920,14 @@ server <- function(input, output, session) {
       df <- df %>% dplyr::group_by(.group) %>% dplyr::filter(any(!is.na(.question))) %>% dplyr::ungroup()
     }
     
-    # --- Weight selection: use input$wgt if available, else @weight0, else 1 ---
+    
     weight_col <- NULL
-    if (!is.null(input$wgt) && nzchar(input$wgt) && input$wgt %in% names(df0)) {
-      weight_col <- input$wgt
+    if (!is.null(input$wgt_stats) && nzchar(input$wgt_stats) && input$wgt_stats %in% names(df0)) {
+      weight_col <- input$wgt_stats
     } else if ("@weight0" %in% names(df0)) {
       weight_col <- "@weight0"
     }
+    
     df <- df %>%
       dplyr::mutate(
         id = dplyr::row_number(),
