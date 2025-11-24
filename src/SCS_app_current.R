@@ -249,6 +249,28 @@ server <- function(input, output, session) {
   
   
   
+  make_display_labels <- function(vars, varlab, vallab) {
+    sapply(vars, function(v) {
+      # Base label from Variable Labels
+      base_label <- varlab$label[varlab$variable == v]
+      if (length(base_label) == 0 || is.na(base_label)) base_label <- v
+      
+      # If it's a child variable (starts with @ and has underscore), append Value=1 label
+      if (grepl("^@", v) && grepl("_", v)) {
+        val1_label <- vallab %>%
+          dplyr::filter(variable == v, value == "1") %>%
+          dplyr::pull(label)
+        if (length(val1_label) > 0 && nzchar(val1_label)) {
+          return(paste0(v, ": ", base_label, " ", val1_label))
+        }
+      }
+      # Default: just base label
+      paste0(v, ": ", base_label)
+    }, USE.NAMES = FALSE)
+  }
+  
+  
+  
   
   # ---------- Read workbook with validations ----------
   wb <- reactive({
@@ -343,10 +365,14 @@ server <- function(input, output, session) {
       return(tagList(h5("Variable of interest (question):"),
                      div(class = "text-danger", "No @q* variables found.")))
     }
+    
+    display_labels <- make_display_labels(qv$variable, wb()$varlab, wb()$vallab)
     selectInput("var", "Variable of interest (question):",
-                choices  = setNames(qv$variable, qv$choice_lab),
+                choices = setNames(qv$variable, display_labels),
                 selected = qv$variable[1], width = "100%")
+    
   })
+  
   output$grp1_select_ui <- renderUI({
     req(wb())
     gv <- choices()$g
@@ -354,10 +380,12 @@ server <- function(input, output, session) {
       return(tagList(h5("Primary grouping variable:"),
                      div(class = "text-danger", "No grouping variables found (non-@).")))
     }
+    display_labels <- make_display_labels(gv$variable, wb()$varlab, wb()$vallab)
     selectInput("grp1", "Primary grouping variable:",
-                choices  = setNames(gv$variable, gv$choice_lab),
+                choices = setNames(gv$variable, display_labels),
                 selected = gv$variable[1], width = "100%")
   })
+  
   output$grp2_select_ui <- renderUI({
     req(wb())
     gv <- choices()$g
@@ -380,27 +408,34 @@ server <- function(input, output, session) {
   
   
   # Statistics tab dropdowns (reuse logic from Plots tab)
+  
   output$var_select_stats_ui <- renderUI({
     req(wb())
     qv <- choices()$q
     if (nrow(qv) == 0) {
       return(tagList(h5("Variable of interest:"), div(class = "text-danger", "No @q* variables found.")))
     }
+    display_labels <- make_display_labels(qv$variable, wb()$varlab, wb()$vallab)
     selectInput("var_stats", "Variable of interest (question):",
-                choices = setNames(qv$variable, qv$choice_lab),
+                choices = setNames(qv$variable, display_labels),
                 selected = qv$variable[1], width = "100%")
   })
+  
+  
   
   output$grp1_select_stats_ui <- renderUI({
     req(wb())
     gv <- choices()$g
     if (nrow(gv) == 0) {
-      return(tagList(h5("Primary grouping variable:"), div(class = "text-danger", "No grouping variables found.")))
+      return(tagList(h5("Primary grouping variable:"),
+                     div(class = "text-danger", "No grouping variables found.")))
     }
+    display_labels <- make_display_labels(gv$variable, wb()$varlab, wb()$vallab)
     selectInput("grp1_stats", "Primary grouping variable:",
-                choices = setNames(gv$variable, gv$choice_lab),
+                choices = setNames(gv$variable, display_labels),
                 selected = gv$variable[1], width = "100%")
   })
+  
   
   output$wgt_select_stats_ui <- renderUI({
     req(wb())
@@ -1115,22 +1150,20 @@ server <- function(input, output, session) {
     )
   })
   
+  
   output$grp1_select_grouped_ui <- renderUI({
     req(wb())
     gv <- choices()$g
     if (nrow(gv) == 0) {
-      return(tagList(
-        h5("Primary Grouping Variable"),
-        div(class = "text-danger", "No grouping variables found.")
-      ))
+      return(tagList(h5("Primary Grouping Variable"),
+                     div(class = "text-danger", "No grouping variables found.")))
     }
-    selectInput(
-      "grp1_grouped", "Primary Grouping Variable:",
-      choices = setNames(gv$variable, gv$choice_lab),
-      selected = gv$variable[1],
-      width = "100%"
-    )
+    display_labels <- make_display_labels(gv$variable, wb()$varlab, wb()$vallab)
+    selectInput("grp1_grouped", "Primary Grouping Variable:",
+                choices = setNames(gv$variable, display_labels),
+                selected = gv$variable[1], width = "100%")
   })
+  
   
   output$wgt_select_grouped_ui <- renderUI({
     req(wb())
