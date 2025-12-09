@@ -139,7 +139,7 @@ render_chisq_table <- function(wide_props) {
     DT::formatPercentage(columns = pct_cols, digits = 1)
 }
 
-#' Run pairwise comparisons
+#' Run pairwise comparisons based on Wald test with bonferonni correction
 #' @param design Survey design object
 #' @param alpha Significance level
 #' @return Data frame with pairwise test results
@@ -154,19 +154,34 @@ run_pairwise_tests <- function(design, alpha = 0.05) {
     g1 <- pair[1]
     g2 <- pair[2]
     
+    # Subset design to these two groups
     sub_dsgn <- subset(design, .group %in% c(g1, g2))
     
+    # For each outcome level, compute Wald test for difference in proportions
     for (y in q_lvls) {
+      # Create indicator variable inside design for outcome == y
       sub_dsgn$variables$outcome_ind <- as.numeric(sub_dsgn$variables$.question == y)
       
+      # svyby estimates weighted mean of outcome_ind by group
+      # Formula uses grouping variable dynamically
       by_formula <- as.formula("~.group")
       by_fit <- survey::svyby(~outcome_ind, by_formula, survey::svymean, design = sub_dsgn)
       
       if (!all(c(g1, g2) %in% by_fit$.group)) next
       
-      co <- coef(by_fit)[c(g1, g2)]
-      V  <- vcov(by_fit)[c(g1, g2), c(g1, g2)]
+      # Extract coefficients (proportions) and variance-covariance matrix
+      co <- coef(by_fit)[c(g1, g2)]  # estimated proportions for g1 and g2
+      V  <- vcov(by_fit)[c(g1, g2), c(g1, g2)]  # variance-covariance matrix
       
+      
+      # --- Wald Test Explanation ---
+      # We test H0: p_g1 - p_g2 = 0 using a linear contrast
+      # Contrast vector d = (1, -1)
+      # Estimated difference: diff_est = sum(d * co)
+      # Variance of difference: Var(diff) = d' V d
+      # SE = sqrt(Var(diff))
+      # Wald z-statistic: z = diff_est / SE
+      # p-value: two-sided normal approximation
       dvec <- c(1, -1)
       diff_est <- sum(dvec * co)
       diff_se  <- sqrt(drop(dvec %*% V %*% dvec))
