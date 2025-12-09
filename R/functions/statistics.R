@@ -198,6 +198,7 @@ run_pairwise_tests <- function(design, alpha = 0.05) {
     }
   }
   
+  # Combine results and apply Bonferroni correction across ALL tests
   res_df <- dplyr::bind_rows(res_list)
   res_df %>%
     dplyr::mutate(
