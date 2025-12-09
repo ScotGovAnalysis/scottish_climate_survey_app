@@ -183,17 +183,14 @@ server <- function(input, output, session) {
     var_map <- collect_group_mappings(input, "var_group_name_", "var_group_levels_", 5)
     grp_map <- collect_group_mappings(input, "grp_group_name_", "grp_group_levels_", 5)
     
-    # Prepare data
-    stats_data <- prepare_stats_data(
+    # Prepare data and create survey design (returns design object directly)
+    dsgn <- prepare_stats_data(
       wb()$data, wb()$vallab,
       input$var_stats, input$grp1_stats, input$wgt_stats,
       var_map, grp_map,
       input$exclude_levels_stats,
       input$drop_empty_groups_stats
     )
-    
-    # Create survey design
-    dsgn <- create_survey_design(stats_data)
     
     # Run chi-square test
     chisq_result <- run_chisq_test(dsgn)
@@ -229,6 +226,7 @@ server <- function(input, output, session) {
       })
     }
   })
+  
   
   # ========== GROUPED PLOTS TAB ==========
   

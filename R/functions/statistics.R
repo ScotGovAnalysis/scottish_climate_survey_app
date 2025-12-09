@@ -11,7 +11,7 @@
 #' @param grp_map Group grouping mappings
 #' @param exclude_levels Levels to exclude
 #' @param drop_empty Drop empty groups flag
-#' @return Prepared data frame
+#' @return Survey design object (not data frame)
 prepare_stats_data <- function(data, vallab, var_stats, grp1_stats, wgt_stats,
                                var_map, grp_map, exclude_levels, drop_empty) {
   # Build labelled factors
@@ -26,27 +26,9 @@ prepare_stats_data <- function(data, vallab, var_stats, grp1_stats, wgt_stats,
     dplyr::mutate(
       .question = collapse_with_drop(.question, var_map),
       .group    = collapse_with_drop(.group, grp_map)
-    ) %>%
-    dplyr::filter(.question != "_DROP_", .group != "_DROP_")
+    )
   
-  # Apply exclusions
-  if (length(exclude_levels) > 0) {
-    df <- df %>%
-      dplyr::filter(
-        !(.question %in% exclude_levels),
-        !(.group %in% exclude_levels)
-      )
-  }
-  
-  # Drop empty groups
-  if (isTRUE(drop_empty)) {
-    df <- df %>% 
-      dplyr::group_by(.group) %>% 
-      dplyr::filter(any(!is.na(.question))) %>% 
-      dplyr::ungroup()
-  }
-  
-  # Add weights
+  # Add weights BEFORE creating survey design
   weight_col <- NULL
   if (!is.null(wgt_stats) && nzchar(wgt_stats) && wgt_stats %in% names(data)) {
     weight_col <- wgt_stats
@@ -61,13 +43,43 @@ prepare_stats_data <- function(data, vallab, var_stats, grp1_stats, wgt_stats,
     ) %>%
     dplyr::mutate(.w = dplyr::if_else(is.na(.w) | .w < 0, 0, .w))
   
-  # Validate and drop levels
-  validate(need(sum(df$.w) > 0 && nrow(df) > 0, "No data remaining after filters/grouping."))
+  # Create survey design FIRST
+  dsgn <- survey::svydesign(ids = ~id, weights = ~.w, data = df)
   
-  df$.question <- droplevels(df$.question)
-  df$.group    <- droplevels(df$.group)
+  # Now subset the survey design (not the data frame)
+  # Remove rows marked as _DROP_ from collapsing
+  dsgn <- subset(dsgn, .question != "_DROP_" & .group != "_DROP_")
   
-  df
+  # Apply exclusions to the survey design
+  if (length(exclude_levels) > 0) {
+    dsgn <- subset(
+      dsgn,
+      !(.question %in% exclude_levels) & !(.group %in% exclude_levels)
+    )
+  }
+  
+  # Drop empty groups if requested
+  if (isTRUE(drop_empty)) {
+    dsgn <- subset(dsgn, !is.na(.question))
+    # Further subset to groups that have at least one non-missing response
+    grp_counts <- dsgn$variables %>%
+      dplyr::group_by(.group) %>%
+      dplyr::summarise(n_valid = sum(!is.na(.question)), .groups = "drop") %>%
+      dplyr::filter(n_valid > 0)
+    dsgn <- subset(dsgn, .group %in% grp_counts$.group)
+  }
+  
+  # Drop unused factor levels after all subsetting
+  dsgn$variables$.question <- droplevels(dsgn$variables$.question)
+  dsgn$variables$.group    <- droplevels(dsgn$variables$.group)
+  
+  # Validate
+  validate(need(
+    nrow(dsgn$variables) > 0 && sum(dsgn$variables$.w) > 0,
+    "No data remaining after filters/grouping."
+  ))
+  
+  dsgn
 }
 
 #' Run chi-squared test
