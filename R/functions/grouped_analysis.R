@@ -91,13 +91,7 @@ compute_grouped_analysis <- function(data, varlab, vallab, var_grouped_root,
   df <- data %>%
     dplyr::mutate(.group = make_factor(.data[[grp1_grouped]], grp1_grouped, vallab))
   
-  # Apply exclusions
-  if (length(exclude_levels_grouped) > 0) {
-    df <- df %>% 
-      dplyr::filter(!(.group %in% exclude_levels_grouped))
-  }
-  
-  # Create indicator columns
+  # Create indicator columns (before any filtering)
   df <- df %>%
     dplyr::mutate(
       dplyr::across(
@@ -106,17 +100,7 @@ compute_grouped_analysis <- function(data, varlab, vallab, var_grouped_root,
       )
     )
   
-  # Drop empty groups
-  if (isTRUE(drop_empty_groups_grouped)) {
-    df <- df %>%
-      dplyr::mutate(any_non_missing = rowSums(!is.na(dplyr::across(dplyr::any_of(children))), na.rm = TRUE)) %>%
-      dplyr::group_by(.group) %>%
-      dplyr::filter(any(any_non_missing > 0)) %>%
-      dplyr::ungroup() %>%
-      dplyr::select(-any_non_missing)
-  }
-  
-  # Add weights
+  # Add weights BEFORE creating survey design
   weight_col <- NULL
   if (!is.null(wgt_grouped) && nzchar(wgt_grouped) && wgt_grouped %in% names(data)) {
     weight_col <- wgt_grouped
@@ -131,12 +115,39 @@ compute_grouped_analysis <- function(data, varlab, vallab, var_grouped_root,
     ) %>%
     dplyr::mutate(.w = dplyr::if_else(is.na(.w) | .w < 0, 0, .w))
   
-  validate(need(sum(df$.w) > 0 && nrow(df) > 0, "No data remaining after filters/grouping."))
-  
-  df$.group <- droplevels(df$.group)
-  
-  # Survey design
+  # Create survey design FIRST
   dsg <- survey::svydesign(ids = ~id, weights = ~.w, data = df)
+  
+  # NOW apply exclusions to the survey design
+  if (length(exclude_levels_grouped) > 0) {
+    dsg <- subset(dsg, !(.group %in% exclude_levels_grouped))
+  }
+  
+  # Drop empty groups if requested (subset the design)
+  if (isTRUE(drop_empty_groups_grouped)) {
+    # Create a variable indicating if row has any non-missing child responses
+    dsg$variables$any_non_missing <- rowSums(
+      !is.na(dsg$variables[, children, drop = FALSE]), 
+      na.rm = TRUE
+    )
+    # Keep only groups that have at least one row with non-missing responses
+    grp_counts <- dsg$variables %>%
+      dplyr::group_by(.group) %>%
+      dplyr::summarise(has_data = any(any_non_missing > 0), .groups = "drop") %>%
+      dplyr::filter(has_data)
+    dsg <- subset(dsg, .group %in% grp_counts$.group)
+    # Clean up temporary variable
+    dsg$variables$any_non_missing <- NULL
+  }
+  
+  # Drop unused factor levels
+  dsg$variables$.group <- droplevels(dsg$variables$.group)
+  
+  # Validate
+  validate(need(
+    nrow(dsg$variables) > 0 && sum(dsg$variables$.w) > 0,
+    "No data remaining after filters/grouping."
+  ))
   
   # Formula for svyby
   fml <- stats::as.formula(
@@ -155,17 +166,17 @@ compute_grouped_analysis <- function(data, varlab, vallab, var_grouped_root,
     "svyby returned no mean columns (all missing?). Try different root or filters."
   ))
   
-  # Run significance tests
-  df <- dsg$variables
+  # Run significance tests on the survey design
+  df_for_test <- dsg$variables
   make_yesno <- function(x) {
     factor(ifelse(x == 1, "Yes", ifelse(is.na(x), NA, "No")), levels = c("No", "Yes"))
   }
   
   for (v in children) {
-    df[[paste0(v, "_yesno")]] <- make_yesno(df[[v]])
+    df_for_test[[paste0(v, "_yesno")]] <- make_yesno(df_for_test[[v]])
   }
   
-  dsg_sig <- survey::svydesign(ids = ~id, weights = ~.w, data = df)
+  dsg_sig <- survey::svydesign(ids = ~id, weights = ~.w, data = df_for_test)
   
   pvals <- sapply(children, function(v) {
     fml <- as.formula(paste0("~", paste0("`", v, "_yesno`"), " + .group"))
