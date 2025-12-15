@@ -8,14 +8,19 @@
 #' @param var Question variable
 #' @param grp1 Primary grouping variable
 #' @param grp2 Secondary grouping variable
+#' @param filter_var Variable to be used for filtering survey
 #' @param wgt Weighting variable
 #' @param drop_empty Drop empty groups flag
 #' @return List with df and question_text
-prepare_analysis_data <- function(data, varlab, vallab, var, grp1, grp2, wgt, drop_empty) {
-  # Select relevant columns
+prepare_analysis_data <- function(data, varlab, vallab,
+                                  var, grp1, grp2, filter_var,  wgt,
+                                  drop_empty) {
+ browser()
+   # Select relevant columns
   sel <- unique(c(var, grp1,
                   if (nzchar(grp2)) grp2 else NULL,
-                  if (nzchar(wgt)) wgt else NULL))
+                  if (nzchar(wgt)) wgt else NULL, 
+                  if (nzchar(filter_var)) filter_var else NULL))
   sel <- sel[sel %in% names(data)]
   
   validate(need(
@@ -38,7 +43,9 @@ prepare_analysis_data <- function(data, varlab, vallab, var, grp1, grp2, wgt, dr
       else factor(NA),
       .w        = if (nzchar(wgt) && wgt %in% names(data))
         suppressWarnings(as.numeric(.data[[wgt]]))
-      else 1
+      else 1, 
+      .filter_var     = if (nzchar(filter_var))
+        make_factor(.data[[filter_var]], filter_var, vallab)
     ) %>%
     dplyr::mutate(.w = ifelse(is.na(.w) | .w < 0, 0, .w)) %>%
     dplyr::mutate(
