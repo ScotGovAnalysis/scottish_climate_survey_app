@@ -192,8 +192,14 @@ server <- function(input, output, session) {
       input$drop_empty_groups_stats
     )
     
+    # check that there are >1 levels in the design data
+    lvls_check <- length(unique(
+      dat_stats$variables[[input$var_stats]]))>1
+      
+  
     # Run chi-square test
-    chisq_result <- run_chisq_test(dsgn)
+    chisq_result <- run_chisq_test(dsgn, lvls_check)
+    
     
     # Render chi-square output
     output$chisq_output <- renderText({

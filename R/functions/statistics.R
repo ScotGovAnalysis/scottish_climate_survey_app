@@ -84,8 +84,10 @@ prepare_stats_data <- function(data, vallab, var_stats, grp1_stats, wgt_stats,
 
 #' Run chi-squared test
 #' @param design Survey design object
+#' @param lvls_check Logical. TRUE if more than one levels in the design data
+#'                   for the selected question after exclusion
 #' @return List with test results and proportions
-run_chisq_test <- function(design) {
+run_chisq_test <- function(design, lvls_check) {
   # Weighted table and proportions
   wtab <- survey::svytable(~ .question + .group, design)
   validate(need(length(wtab) > 0, "No cells in contingency table."))
@@ -102,8 +104,12 @@ run_chisq_test <- function(design) {
     dplyr::arrange(response)
   
   # Chi-square test
-  chisq_res <- survey::svychisq(~ .question + .group, design = design, statistic = "F")
-  p_val <- tryCatch(chisq_res$p.value, error = function(e) NA_real_)
+  if(lvls_check){
+    chisq_res <- survey::svychisq(~ .question + .group, design = design, statistic = "F")
+    p_val <- tryCatch(chisq_res$p.value, error = function(e) NA_real_)
+  } else {
+    p_val <- 1
+  }
   
   list(
     p_value = p_val,
