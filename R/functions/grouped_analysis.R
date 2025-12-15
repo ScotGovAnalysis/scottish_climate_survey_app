@@ -180,8 +180,13 @@ compute_grouped_analysis <- function(data, varlab, vallab, var_grouped_root,
   
   pvals <- sapply(children, function(v) {
     fml <- as.formula(paste0("~", paste0("`", v, "_yesno`"), " + .group"))
-    out <- survey::svychisq(fml, design = dsg_sig, na.rm = TRUE)
-    pv <- tryCatch(out$p.value, error = function(e) NA_real_)
+    # ensure that there are contrasts in the data for running chi-squared
+    if(all(df_for_test[[paste0(v, "_yesno")]] == "Yes") |
+       all(df_for_test[[paste0(v, "_yesno")]] == "No")){
+      pv <- 1} else {
+      out <- survey::svychisq(fml, design = dsg_sig, na.rm = TRUE)
+      pv <- tryCatch(out$p.value, error = function(e) NA_real_)
+    } 
     pv
   })
   
