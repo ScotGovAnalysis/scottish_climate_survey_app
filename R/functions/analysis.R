@@ -15,7 +15,7 @@
 prepare_analysis_data <- function(data, varlab, vallab,
                                   var, grp1, grp2, filter_var,  wgt,
                                   drop_empty) {
- browser()
+ 
    # Select relevant columns
   sel <- unique(c(var, grp1,
                   if (nzchar(grp2)) grp2 else NULL,
@@ -121,6 +121,7 @@ filter_survey_design <- function(design, exclude_levels) {
 #' @param design Survey design object
 #' @return Data frame with proportions
 calculate_proportions <- function(design) {
+  
   tab <- tryCatch(
     survey::svytable(~ .group + .question, design = design),
     error = function(e) {
