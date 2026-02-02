@@ -1,6 +1,7 @@
 library(tidymodels)
-library(vip)
+#library(vip)
 library(shiny)
+library(tidyverse)
 # Source all function files
 function_files <- list.files("./R/functions", pattern = "\\.R$", full.names = TRUE)
 for (file in function_files) {
