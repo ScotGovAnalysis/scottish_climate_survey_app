@@ -1,0 +1,332 @@
+---
+title: "Subset qa1 analysis"
+output: html_document
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, 
+                      warning = FALSE, 
+                      message = FALSE)
+```
+
+```{r load_and_design}
+
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(forcats)
+library(ggplot2)
+library(DT)
+library(scales)
+library(survey)
+library(tibble)
+library(shiny)
+
+# Source all function files
+function_files <- list.files("../R/functions", pattern = "\\.R$", full.names = TRUE)
+for (file in function_files) {
+  source(file)
+}
+
+
+
+
+create_designs <- function(data_tbl, varlab, vallab,
+                                  input_var, input_grp, grp2, filter_var,  wgt,
+                                  drop_empty){
+        prep_dat <- prepare_analysis_data(  data_tbl, varlab, vallab,
+        input_var, input_grp, "", filter_var = filter_var, "",
+        NULL
+      )
+      
+      design_re <- create_survey_design(prep_dat$df)
+      
+      
+      
+      exclude_levels <- c("Not stated", "Don't know", "Prefer not to say")
+      design_filtered <- 
+        filter_survey_design(design_re, exclude_levels)
+      
+      design_filtered_qa1 <- subset(design_filtered, 
+                          .filter_var %in% c("A great deal", "A fair amount"))
+      design_filtered_qa1$variables[[".filter_var"]] <- droplevels(design_filtered_qa1$variables[[".filter_var"]])
+      
+        
+      
+      list(all_qa1 = design_filtered, 
+           filt_qa1 = design_filtered_qa1)
+}
+
+create_plt_table <- function(design){
+  
+  # Proportions and counts
+  prop_df <-
+    calculate_proportions(design)
+ 
+  
+  unweighted_ns <- 
+    calculate_unweighted_ns(design)
+  
+  
+ 
+  
+  # Plot object
+  prop_plot_obj <- 
+    create_proportion_plot(
+      prop_df,
+      "RdYlGn",
+       FALSE
+    )
+  
+  
+  
+  
+  # Wide table
+  wide_table <-
+    create_wide_table(prop_df, unweighted_ns)
+  
+  
+  list(plt = prop_plot_obj, 
+       tbl = render_proportion_table(wide_table))
+  
+  
+}
+
+
+
+
+
+```
+
+
+```{r}
+
+path <- "../data/Scottish Climate Survey - 2024 data + labels.xlsx"
+
+
+dat <- read_workbook(path, 6 * 1024^2)
+data_tbl <- dat$data
+varlab   <- dat$varlab
+vallab   <-dat$vallab
+
+input_var <- purrr::map(1:8, ~paste("qc1_", .x, "_actionscale", sep = ""))
+
+input_grp <- "incomeycombined"
+filter_var <- "qa1"
+
+
+designs <- purrr::map(input_var, ~create_designs(data_tbl, varlab, vallab,
+        .x, input_grp, `@weight0`, filter_var = filter_var, "", NULL))
+
+plts_tbls_all_qa1 <- purrr::map(designs, ~create_plt_table(.x$all_qa1))
+plts_tbls_filt_qa1 <- purrr::map(designs, ~create_plt_table(.x$filt_qa1))
+
+
+```
+# Analysis {.tabset}
+
+Comparison of tables looking at all QA1 (Upper) and subsetting for qa1 = "A great deal", "A fair amount" (lower)
+
+## QC1_1_actionscale
+
+### Plots (all, filtered)
+```{r}
+
+i <- 1
+
+
+plts_tbls_all_qa1[[i]]$plt
+plts_tbls_filt_qa1[[i]]$plt
+
+
+```
+
+### Tables (all, filtered)
+
+```{r}
+
+plts_tbls_all_qa1[[i]]$tbl
+plts_tbls_filt_qa1[[i]]$tbl
+
+
+```
+
+## QC1_2_actionscale
+
+### Plots (all, filtered)
+```{r}
+
+i <- 2
+
+
+plts_tbls_all_qa1[[i]]$plt
+plts_tbls_filt_qa1[[i]]$plt
+
+
+```
+
+### Tables (all, filtered)
+
+```{r}
+
+plts_tbls_all_qa1[[i]]$tbl
+plts_tbls_filt_qa1[[i]]$tbl
+
+
+```
+
+  
+## QC1_3_actionscale
+### Plots (all, filtered)
+```{r}
+
+i <- 3
+
+
+plts_tbls_all_qa1[[i]]$plt
+plts_tbls_filt_qa1[[i]]$plt
+
+
+```
+
+### Tables (all, filtered)
+
+```{r}
+
+plts_tbls_all_qa1[[i]]$tbl
+plts_tbls_filt_qa1[[i]]$tbl
+
+
+```
+
+
+
+
+
+## QC1_4_actionscale
+### Plots (all, filtered)
+```{r}
+
+i <- 4
+
+
+plts_tbls_all_qa1[[i]]$plt
+plts_tbls_filt_qa1[[i]]$plt
+
+
+```
+
+### Tables (all, filtered)
+
+```{r}
+
+plts_tbls_all_qa1[[i]]$tbl
+plts_tbls_filt_qa1[[i]]$tbl
+
+
+```
+
+
+## QC1_5_actionscale
+### Plots (all, filtered)
+```{r}
+
+i <- 5
+
+
+plts_tbls_all_qa1[[i]]$plt
+plts_tbls_filt_qa1[[i]]$plt
+
+
+```
+
+### Tables (all, filtered)
+
+```{r}
+
+plts_tbls_all_qa1[[i]]$tbl
+plts_tbls_filt_qa1[[i]]$tbl
+
+
+```
+
+## QC1_6_actionscale
+### Plots (all, filtered)
+```{r}
+
+i <- 6
+
+
+plts_tbls_all_qa1[[i]]$plt
+plts_tbls_filt_qa1[[i]]$plt
+
+
+```
+
+### Tables (all, filtered)
+
+```{r}
+
+plts_tbls_all_qa1[[i]]$tbl
+plts_tbls_filt_qa1[[i]]$tbl
+
+
+```
+
+## QC1_7_actionscale
+### Plots (all, filtered)
+```{r}
+
+i <- 7
+
+
+plts_tbls_all_qa1[[i]]$plt
+plts_tbls_filt_qa1[[i]]$plt
+
+
+```
+
+### Tables (all, filtered)
+
+```{r}
+
+plts_tbls_all_qa1[[i]]$tbl
+plts_tbls_filt_qa1[[i]]$tbl
+
+
+```
+
+
+## QC1_8_actionscale
+### Plots (all, filtered)
+```{r}
+
+i <- 8
+
+
+plts_tbls_all_qa1[[i]]$plt
+plts_tbls_filt_qa1[[i]]$plt
+
+
+```
+
+### Tables (all, filtered)
+
+```{r}
+
+plts_tbls_all_qa1[[i]]$tbl
+plts_tbls_filt_qa1[[i]]$tbl
+
+
+```
+
+
+
+
+
+
+
+
+
