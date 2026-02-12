@@ -1,3 +1,10 @@
+# This script uses SMOTE on the qclimate response variable, collapsed into three classes
+# Followed by hierarchical clustering of predictors to see which variables are in
+# clusters with the selected predictors
+
+# Mediocre performance and analysis superceded by script
+# tidymodels_test_lasso_smote_cluster.R (two level prediction)
+
 library(tidymodels)
 #library(vip)
 library(shiny)
