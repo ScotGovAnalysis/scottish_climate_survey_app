@@ -25,6 +25,10 @@ R/
 │       ├── test-utils.R
 │       ├── test-factors.R
 │       └── ...
+└── inst/
+     └── tidymodels_test_lasso.R
+     └── tidymodels_test_lasso_smote_cluser.R
+└── src/
 └── README.md                # This file
 ```
 
@@ -136,3 +140,6 @@ To add new tests:
 - Negative codes in numeric variables are treated as missing
 - The app supports files up to 100 MB
 - Lonely PSUs are adjusted automatically in survey designs
+
+## Other non-app files
+The folder inst/ contains analysis scripts. Lasso model prediction of qclimate1 and heirarchical clustering of predictors. The folder src/ contains other analysis scripts
